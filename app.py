@@ -21,25 +21,47 @@ def clean_review(text):
 
 # Function to highlight positive and negative words in red/green
 def highlight_text(text):
-    words = text.split()
-    highlighted_html = "" 
-
-    for word in words:
-        clean_word = word.lower().strip(".,!?:;\"")
-        weight = word_weights.get(clean_word, 0)
-
-        
-        if weight > 1.5: 
-            color = "#d4edda"
-            highlighted_html += f'<span style="background-color: {color}; color: black; padding: 2px 5px; border-radius: 3px; border: 1px solid #c3e6cb; font-weight: bold;">{word}</span> '
-        elif weight < -1.5:  
-            color = "#f8d7da"
-            highlighted_html += f'<span style="background-color: {color}; color: black; padding: 2px 5px; border-radius: 3px; border: 1px solid #f5c6cb; font-weight: bold;">{word}</span> '
-        else:
-            highlighted_html += f"{word} "
+    # Ord som vi aldrig vill highlighta eftersom de inte bär på sentiment
+    ignore_list = [
+        "is", "was", "the", "a", "an", "and", "it", "to", "of", "i", 
+        "in", "with", "for", "as", "at", "by", "this", "that", "there"
+    ]
     
+    words = text.split()
+    i = 0
+    highlighted_html = ""
+    
+    while i < len(words):
+        # Tvätta orden för logik-matchning
+        current_clean = re.sub(r'[^a-z]', '', words[i].lower())
+        
+        # Kolla Bigram först
+        bigram = ""
+        if i < len(words) - 1:
+            next_clean = re.sub(r'[^a-z]', '', words[i+1].lower())
+            bigram = f"{current_clean} {next_clean}"
+        
+        # 1. Kolla om vi har ett meningsfullt Bigram (t.ex. "not great")
+        # Vi kollar inte ignore_list här, för "not" + "great" är viktigt tillsammans!
+        if bigram in word_weights and abs(word_weights[bigram]) > 1.0:
+            weight = word_weights[bigram]
+            color = "#f8d7da" if weight < 0 else "#d4edda"
+            highlighted_html += f'<span style="background-color: {color}; color: black; padding: 2px 5px; border-radius: 3px; border: 1px solid; font-weight: bold;">{words[i]} {words[i+1]}</span> '
+            i += 2
+            continue
+        
+        # 2. Kolla enskilt ord (OM det inte finns i ignore_list)
+        weight = word_weights.get(current_clean, 0)
+        
+        if current_clean not in ignore_list and abs(weight) > 1.2:
+            color = "#d4edda" if weight > 0 else "#f8d7da"
+            highlighted_html += f'<span style="background-color: {color}; color: black; padding: 2px 5px; border-radius: 3px; border: 1px solid; font-weight: bold;">{words[i]}</span> '
+        else:
+            highlighted_html += f"{words[i]} "
+        
+        i += 1
+            
     return highlighted_html
-
 
 # Load model and vectorizer
 with open('models/sentiment_model.pkl', 'rb') as f:
@@ -51,6 +73,59 @@ with open('models/vectorizer.pkl', 'rb') as f:
 with open('models/word_weights.json', 'rb') as f:
     word_weights = json.load(f)
 
+st.set_page_config(
+    page_title="CinemaSentiment AI",
+    page_icon="🎬",
+    layout="wide"
+)
+
+# CSS
+st.markdown("""
+    <style>
+    .stApp {
+        background-color: #141414;
+        color: #ffffff;
+    }
+    
+    [data-testid="stSidebar"] {
+        background-color: #1f1f1f;
+        border-right: 1px solid #333;
+    }
+    
+    .stTextArea textarea {
+        background-color: #2b2b2b !important;
+        color: #ffffff !important;
+        border: 1px solid #444 !important;
+        border-radius: 10px !important;
+    }
+    
+    .stButton>button {
+        background-color: #e50914 !important; /* Netflix röd */
+        color: white !important;
+        border: none !important;
+        border-radius: 4px !important;
+        font-weight: bold !important;
+        padding: 0.6rem 2rem !important;
+        transition: 0.3s;
+    }
+    
+    .stButton>button:hover {
+        background-color: #f40612 !important;
+        transform: scale(1.02);
+    }
+
+    .stAlert {
+        background-color: #333 !important;
+        color: white !important;
+        border: 1px solid #444 !important;
+    }
+
+    h1, h2, h3 {
+        color: #e50914 !important;
+        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 
 with st.sidebar:
@@ -58,6 +133,7 @@ with st.sidebar:
     page = st.radio("Choose Mode:", ["Single Review Analysis", "Multiple Review Analysis", "Model Insights"])
     st.info("This app uses a Logistic Regression model trained on 50,000 IMDB reviews.")
 
+# For the user to input a single review and get a result from the AI
 if page == "Single Review Analysis":
     st.header("Manual Sentiment Analysis")
     user_input = st.text_area("Your review: ", placeholder="The movie was amazing...")
@@ -76,16 +152,28 @@ if page == "Single Review Analysis":
             st.markdown(highlight_text(user_input), unsafe_allow_html=True)
             st.info("Note: Highlights show individual word importance. The AI also considers word combinations (like 'not great') for its final decision.")
 
-            if 0.4 <= pos_score <= 0.6:
-                st.warning(f"This review feels a bit mixed, not sure if positive or negative. (Confidence: {pos_score:.2%})")
-            elif pos_score > 0.6:
-                st.success(f"This review is positive! (Confidence: {pos_score:.1%})")
-            else:
-                st.success(f"This review is negative! (Confidence: {probabilities[0]:.1%})")
+            st.write("----")
+            col1, col2 = st.columns([1, 2])
+    
+            with col1:
+                if pos_score > 0.6:
+                    st.markdown("### Result: 🟩 Positive")
+                elif pos_score < 0.4:
+                    st.markdown("### Result: 🟥 Negative")
+                else:
+                    st.markdown("### Result: 🟨 Neutral")
+                
+                st.metric("Confidence Score", f"{pos_score:.1%}")
+
+            with col2:
+                st.write("### Positivity Meter")
+                st.progress(pos_score)
+                if pos_score > 0.8:
+                    st.caption("The AI is very confident this is a glowing review!")
         else:
             st.warning("Please write your review first.")
 
-
+# For the user to input multiple reviews at the same time
 elif page == "Multiple Review Analysis":
     st.header("Bulk Sentiment Analysis")
     st.write("Copy and paste multiple reviews below. The AI will analyze each paragraph and show you the overall mood.")
@@ -150,6 +238,7 @@ elif page == "Multiple Review Analysis":
         else:
             st.warning("The text box is empty!")
 
+# Info/statistics about the model used
 elif page == "Model Insights":
     st.header("Model Performance & Insights")
     st.write("Below it is showed how the model was evaluated and what it actually learned.")
@@ -188,11 +277,3 @@ elif page == "Model Insights":
         for word, weight in pos_features:
             st.write(f"{word}: {weight:.2f}")
 
-'''
---Logistic Regression--
-Accuracy: 88.92%
-Confusion Matrix:
-[[6483  928]
- [ 734 6855]]
-
-'''
