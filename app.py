@@ -3,8 +3,6 @@ import pickle
 import re
 import pandas as pd
 import json
-import requests
-from bs4 import BeautifulSoup
 import matplotlib.pyplot as plt
 
 # Function to clean the reviews, removing unnecessary text/symbols
@@ -21,46 +19,39 @@ def clean_review(text):
 
 # Function to highlight positive and negative words in red/green
 def highlight_text(text):
-    # Ord som vi aldrig vill highlighta eftersom de inte bär på sentiment
-    ignore_list = [
-        "is", "was", "the", "a", "an", "and", "it", "to", "of", "i", 
-        "in", "with", "for", "as", "at", "by", "this", "that", "there"
-    ]
+    ignore_list = ["is", "was", "the", "a", "an", "and", "it", "to", "of", "i", "in", "with", "for", "as", "at", "by", "this", "that", "there"]
+    negations = ["not", "no", "never", "didnt", "wasnt", "arent", "neither", "nor"]
     
     words = text.split()
     i = 0
     highlighted_html = ""
     
     while i < len(words):
-        # Tvätta orden för logik-matchning
         current_clean = re.sub(r'[^a-z]', '', words[i].lower())
-        
-        # Kolla Bigram först
+
         bigram = ""
         if i < len(words) - 1:
             next_clean = re.sub(r'[^a-z]', '', words[i+1].lower())
             bigram = f"{current_clean} {next_clean}"
         
-        # 1. Kolla om vi har ett meningsfullt Bigram (t.ex. "not great")
-        # Vi kollar inte ignore_list här, för "not" + "great" är viktigt tillsammans!
         if bigram in word_weights and abs(word_weights[bigram]) > 1.0:
             weight = word_weights[bigram]
             color = "#f8d7da" if weight < 0 else "#d4edda"
             highlighted_html += f'<span style="background-color: {color}; color: black; padding: 2px 5px; border-radius: 3px; border: 1px solid; font-weight: bold;">{words[i]} {words[i+1]}</span> '
             i += 2
             continue
-        
-        # 2. Kolla enskilt ord (OM det inte finns i ignore_list)
+
+        prev_clean = re.sub(r'[^a-z]', '', words[i-1].lower()) if i > 0 else ""
         weight = word_weights.get(current_clean, 0)
         
-        if current_clean not in ignore_list and abs(weight) > 1.2:
+        if prev_clean in negations and weight > 0:
+            highlighted_html += f'<span style="background-color: #f8d7da; color: black; padding: 2px 5px; border-radius: 3px; border: 1px solid; font-weight: bold;">{words[i]}</span> '
+        elif current_clean not in ignore_list and abs(weight) > 1.2:
             color = "#d4edda" if weight > 0 else "#f8d7da"
             highlighted_html += f'<span style="background-color: {color}; color: black; padding: 2px 5px; border-radius: 3px; border: 1px solid; font-weight: bold;">{words[i]}</span> '
         else:
             highlighted_html += f"{words[i]} "
-        
         i += 1
-            
     return highlighted_html
 
 # Load model and vectorizer
@@ -196,14 +187,14 @@ elif page == "Multiple Review Analysis":
                 for r in review_list:
                     cleaned = clean_review(r)
                     vec = vectorizer.transform([cleaned])
-                    prob = model.predict_proba(vec)[0][1]
-                    
-                    if 0.45 <= prob <= 0.55:
-                        results["Neutral"] += 1
-                    elif prob > 0.55:
+                    prob = model.predict_proba(vec)[0][1] 
+
+                    if prob > 0.5:
                         results["Positive"] += 1
-                    else:
+                    elif prob < 0.45:
                         results["Negative"] += 1
+                    else:
+                        results["Neutral"] += 1
 
                 col1, col2 = st.columns([1, 1])
 
